@@ -2,6 +2,7 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import { ShieldCheck } from "@/components/icons/ShieldCheck";
 import { Camera, FileText, AlertTriangle } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export const HeroSection: React.FC = () => {
   return (
@@ -34,12 +35,14 @@ export const HeroSection: React.FC = () => {
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-              <Button variant="hero" size="xl">
-                <Camera className="w-6 h-6" />
-                สแกนเอกสาร
+              <Button variant="hero" size="xl" asChild>
+                <Link to="/demo">
+                  <Camera className="w-6 h-6" />
+                  สแกนเอกสาร
+                </Link>
               </Button>
-              <Button variant="outline" size="xl">
-                ดูตัวอย่าง
+              <Button variant="outline" size="xl" asChild>
+                <a href="#result">ดูตัวอย่าง</a>
               </Button>
             </div>
 
