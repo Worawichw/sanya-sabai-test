@@ -128,12 +128,18 @@ serve(async (req) => {
     // Parse JSON from the response
     let analysisResult;
     try {
-      // Remove markdown code blocks if present
+      // Remove markdown code blocks and other prefixes
       let cleanContent = content;
 
       // Remove ```json and ``` markers
       cleanContent = cleanContent.replace(/```json\s*/g, '');
       cleanContent = cleanContent.replace(/```\s*/g, '');
+
+      // Remove "json prefix if present (common in some API responses)
+      cleanContent = cleanContent.replace(/^["']?json\s*/i, '');
+
+      // Remove any leading/trailing quotes
+      cleanContent = cleanContent.replace(/^["']+|["']+$/g, '');
       cleanContent = cleanContent.trim();
 
       // Try to extract JSON from the response
