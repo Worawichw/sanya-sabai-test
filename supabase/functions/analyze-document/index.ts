@@ -13,9 +13,9 @@ serve(async (req) => {
   try {
     const { imageBase64, textContent } = await req.json();
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-    if (!OPENAI_API_KEY) {
-      throw new Error("OPENAI_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY is not configured");
     }
 
     const systemPrompt = `คุณเป็นผู้เชี่ยวชาญด้านกฎหมายและการเงินของไทย ที่ช่วยวิเคราะห์สัญญาและเอกสารทางกฎหมายให้เข้าใจง่าย
@@ -42,15 +42,15 @@ serve(async (req) => {
 - ห้ามเรียกดอกเบี้ยทบต้น
 - สัญญาที่ไม่เป็นธรรมอาจถูกศาลสั่งให้เป็นโมฆะได้
 
-**สำคัญมาก:** กรุณาตอบกลับเป็น JSON object เท่านั้น ห้ามใส่ \`\`\`json หรือข้อความอื่นใดนอกเหนือจาก JSON object ที่สมบูรณ์`;
+หากเป็นรูปภาพ ให้อ่านข้อความจากรูปก่อนแล้วจึงวิเคราะห์`;
 
-    // Prepare messages for OpenAI API
-    const messages: any[] = [
-      {
-        role: "system",
-        content: systemPrompt
-      }
-    ];
+    // Prepare content for Gemini API
+    let parts: any[] = [];
+
+    // Add system prompt as text
+    parts.push({
+      text: systemPrompt + "\n\n**สำคัญมาก:** กรุณาตอบกลับเป็น JSON object เท่านั้น ห้ามใส่ ```json หรือข้อความอื่นใดนอกเหนือจาก JSON object ที่สมบูรณ์"
+    });
 
     if (imageBase64) {
       // Extract base64 data without data URI prefix
@@ -58,25 +58,15 @@ serve(async (req) => {
         ? imageBase64.split("base64,")[1]
         : imageBase64;
 
-      messages.push({
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: "กรุณาวิเคราะห์เอกสารในรูปภาพนี้และตอบกลับเป็น JSON ตามรูปแบบที่กำหนด"
-          },
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:image/jpeg;base64,${base64Data}`
-            }
-          }
-        ]
+      parts.push({
+        inline_data: {
+          mime_type: "image/jpeg",
+          data: base64Data
+        }
       });
     } else if (textContent) {
-      messages.push({
-        role: "user",
-        content: `กรุณาวิเคราะห์เอกสารต่อไปนี้:\n\n${textContent}`
+      parts.push({
+        text: `\n\nเอกสารที่ต้องวิเคราะห์:\n${textContent}`
       });
     } else {
       return new Response(
@@ -85,32 +75,35 @@ serve(async (req) => {
       );
     }
 
-    console.log("Calling OpenAI API for document analysis...");
-    console.log("Using model:", imageBase64 ? "gpt-4o" : "gpt-4o-mini");
+    const contents = [{
+      role: "user",
+      parts: parts
+    }];
+
+    console.log("Calling Gemini API for document analysis...");
+    console.log("Using model: gemini-2.5-flash");
 
     const response = await fetch(
-      "https://api.openai.com/v1/chat/completions",
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${OPENAI_API_KEY}`
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: imageBase64 ? "gpt-4o" : "gpt-4o-mini",
-          messages: messages,
-          temperature: 0.3,
-          max_tokens: 2048,
-          response_format: { type: "json_object" }
+          contents: contents,
+          generationConfig: {
+            temperature: 0.3,
+
+            responseMimeType: "application/json"
+          }
         })
       }
     );
 
-    console.log("OpenAI API response status:", response.status);
+    console.log("Gemini API response status:", response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("OpenAI API error details:", errorText);
+      console.error("Gemini API error details:", errorText);
 
       if (response.status === 429) {
         return new Response(
@@ -118,42 +111,38 @@ serve(async (req) => {
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      if (response.status === 401) {
+      if (response.status === 402 || response.status === 403) {
         return new Response(
-          JSON.stringify({ error: "API Key ไม่ถูกต้อง กรุณาติดต่อผู้ดูแลระบบ" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (response.status === 403) {
-        return new Response(
-          JSON.stringify({ error: "ไม่มีสิทธิ์เข้าถึง API กรุณาตรวจสอบ API Key" }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (response.status === 429 || response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "OpenAI credits หมด กรุณาเติมเครดิตในบัญชี OpenAI" }),
+          JSON.stringify({ error: "API Key ไม่ถูกต้อง หรือไม่มีสิทธิ์เข้าถึง" }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+      if (response.status === 404) {
+        return new Response(
+          JSON.stringify({ error: "Model ไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
 
-      throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
+    console.log("Gemini API raw response:", JSON.stringify(data).substring(0, 200));
+
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!content) {
-      console.error("OpenAI API response:", JSON.stringify(data));
+      console.error("Gemini API response:", JSON.stringify(data));
       throw new Error("No content in AI response");
     }
 
-    console.log("AI Response:", content);
+    console.log("AI Response:", content.substring(0, 200));
 
     // Parse JSON from the response
     let analysisResult;
     try {
-      // OpenAI with response_format json_object should return clean JSON
+      // Gemini with responseMimeType json should return clean JSON
       analysisResult = JSON.parse(content);
       console.log("✅ Successfully parsed JSON response");
     } catch (parseError) {
@@ -164,20 +153,40 @@ serve(async (req) => {
       let cleanContent = content;
       cleanContent = cleanContent.replace(/```json\s*/gi, '');
       cleanContent = cleanContent.replace(/```\s*/g, '');
+      cleanContent = cleanContent.replace(/^["']?json\s*/i, '');
       cleanContent = cleanContent.trim();
 
       try {
+        // Try direct parse after cleaning
         analysisResult = JSON.parse(cleanContent);
         console.log("✅ Parsed after cleaning");
       } catch (e) {
-        // Return a fallback response
-        analysisResult = {
-          documentType: "เอกสารทั่วไป",
-          riskScore: 50,
-          summary: content.slice(0, 200),
-          risks: [],
-          recommendations: ["กรุณาปรึกษาผู้เชี่ยวชาญเพิ่มเติม"]
-        };
+        // Try regex extraction
+        const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            analysisResult = JSON.parse(jsonMatch[0]);
+            console.log("✅ Parsed using regex extraction");
+          } catch (e2) {
+            // Return fallback response
+            analysisResult = {
+              documentType: "เอกสารทั่วไป",
+              riskScore: 50,
+              summary: content.slice(0, 200),
+              risks: [],
+              recommendations: ["กรุณาปรึกษาผู้เชี่ยวชาญเพิ่มเติม"]
+            };
+          }
+        } else {
+          // Return fallback response
+          analysisResult = {
+            documentType: "เอกสารทั่วไป",
+            riskScore: 50,
+            summary: content.slice(0, 200),
+            risks: [],
+            recommendations: ["กรุณาปรึกษาผู้เชี่ยวชาญเพิ่มเติม"]
+          };
+        }
       }
     }
 
