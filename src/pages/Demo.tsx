@@ -2,8 +2,8 @@ import React, { useState, useCallback } from "react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
-import { 
-  Camera, Upload, FileText, Loader2, ArrowLeft, 
+import {
+  Camera, Upload, FileText, Loader2, ArrowLeft,
   AlertTriangle, CheckCircle, Phone, Download, Share2,
   Sparkles, Eye, RotateCcw
 } from "lucide-react";
@@ -61,7 +61,7 @@ const Demo: React.FC = () => {
 
   const handleFile = (file: File) => {
     setUploadedFile(file);
-    
+
     const reader = new FileReader();
     reader.onload = (e) => {
       setImagePreview(e.target?.result as string);
@@ -72,31 +72,40 @@ const Demo: React.FC = () => {
 
   const analyzeDocument = useCallback(async () => {
     if (!imagePreview) return;
-    
+
     setStep("analyzing");
-    
+
     try {
+      console.log("🚀 Calling edge function analyze-document...");
+      console.log("📍 Supabase URL:", import.meta.env.VITE_SUPABASE_URL);
+
       const { data, error } = await supabase.functions.invoke("analyze-document", {
         body: { imageBase64: imagePreview }
       });
 
+      console.log("📥 Response:", { data, error });
+
       if (error) {
+        console.error("❌ Supabase function error:", error);
         throw error;
       }
 
       if (data?.error) {
+        console.error("❌ Function returned error:", data.error);
         throw new Error(data.error);
       }
 
       if (data?.analysis) {
+        console.log("✅ Analysis successful:", data.analysis);
         setAnalysisResult(data.analysis);
         setStep("result");
         toast.success("วิเคราะห์เสร็จสิ้น!");
       } else {
+        console.error("❌ No analysis data in response");
         throw new Error("ไม่สามารถวิเคราะห์เอกสารได้");
       }
     } catch (error) {
-      console.error("Analysis error:", error);
+      console.error("💥 Analysis error:", error);
       toast.error(error instanceof Error ? error.message : "เกิดข้อผิดพลาด กรุณาลองใหม่");
       setStep("preview");
     }
@@ -199,7 +208,7 @@ const Demo: React.FC = () => {
                   <div className="flex flex-col items-center gap-1">
                     <div className={`
                       w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium
-                      ${isCurrent ? "bg-primary text-primary-foreground ring-4 ring-primary/20" : 
+                      ${isCurrent ? "bg-primary text-primary-foreground ring-4 ring-primary/20" :
                         isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}
                     `}>
                       {index + 1}
@@ -218,8 +227,8 @@ const Demo: React.FC = () => {
             <div
               className={`
                 relative p-8 md:p-12 rounded-3xl border-2 border-dashed transition-all duration-300
-                ${isDragging 
-                  ? "border-primary bg-primary/5 scale-[1.02]" 
+                ${isDragging
+                  ? "border-primary bg-primary/5 scale-[1.02]"
                   : "border-border bg-card hover:border-primary/50"
                 }
               `}
@@ -284,9 +293,9 @@ const Demo: React.FC = () => {
                   <span className="text-sm text-muted-foreground">{uploadedFile?.name}</span>
                 </div>
                 <div className="p-4 bg-muted/30">
-                  <img 
-                    src={imagePreview} 
-                    alt="Document preview" 
+                  <img
+                    src={imagePreview}
+                    alt="Document preview"
                     className="max-h-[400px] mx-auto rounded-lg object-contain"
                   />
                 </div>
