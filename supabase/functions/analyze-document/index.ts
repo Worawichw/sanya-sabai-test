@@ -13,9 +13,9 @@ serve(async (req) => {
   try {
     const { imageBase64, textContent } = await req.json();
 
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-    if (!GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY is not configured");
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    if (!OPENAI_API_KEY) {
+      throw new Error("OPENAI_API_KEY is not configured");
     }
 
     const systemPrompt = `คุณเป็นผู้เชี่ยวชาญด้านกฎหมายและการเงินของไทย ที่ช่วยวิเคราะห์สัญญาและเอกสารทางกฎหมายให้เข้าใจง่าย
@@ -42,15 +42,15 @@ serve(async (req) => {
 - ห้ามเรียกดอกเบี้ยทบต้น
 - สัญญาที่ไม่เป็นธรรมอาจถูกศาลสั่งให้เป็นโมฆะได้
 
-หากเป็นรูปภาพ ให้อ่านข้อความจากรูปก่อนแล้วจึงวิเคราะห์`;
+**สำคัญมาก:** กรุณาตอบกลับเป็น JSON object เท่านั้น ห้ามใส่ \`\`\`json หรือข้อความอื่นใดนอกเหนือจาก JSON object ที่สมบูรณ์`;
 
-    // Prepare content for Gemini API
-    let parts: any[] = [];
-
-    // Add system prompt as text
-    parts.push({
-      text: systemPrompt + "\n\nกรุณาวิเคราะห์เอกสารและตอบกลับเป็น JSON ตามรูปแบบที่กำหนด"
-    });
+    // Prepare messages for OpenAI API
+    const messages: any[] = [
+      {
+        role: "system",
+        content: systemPrompt
+      }
+    ];
 
     if (imageBase64) {
       // Extract base64 data without data URI prefix
@@ -58,15 +58,25 @@ serve(async (req) => {
         ? imageBase64.split("base64,")[1]
         : imageBase64;
 
-      parts.push({
-        inline_data: {
-          mime_type: "image/jpeg",
-          data: base64Data
-        }
+      messages.push({
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "กรุณาวิเคราะห์เอกสารในรูปภาพนี้และตอบกลับเป็น JSON ตามรูปแบบที่กำหนด"
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:image/jpeg;base64,${base64Data}`
+            }
+          }
+        ]
       });
     } else if (textContent) {
-      parts.push({
-        text: `\n\nเอกสารที่ต้องวิเคราะห์:\n${textContent}`
+      messages.push({
+        role: "user",
+        content: `กรุณาวิเคราะห์เอกสารต่อไปนี้:\n\n${textContent}`
       });
     } else {
       return new Response(
@@ -75,24 +85,22 @@ serve(async (req) => {
       );
     }
 
-    const contents = [{
-      role: "user",
-      parts: parts
-    }];
-
-    console.log("Calling Gemini API for document analysis...");
+    console.log("Calling OpenAI API for document analysis...");
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      "https://api.openai.com/v1/chat/completions",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`
+        },
         body: JSON.stringify({
-          contents: contents,
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 2048,
-          }
+          model: imageBase64 ? "gpt-4o" : "gpt-4o-mini",
+          messages: messages,
+          temperature: 0.3,
+          max_tokens: 2048,
+          response_format: { type: "json_object" }
         })
       }
     );
@@ -104,22 +112,22 @@ serve(async (req) => {
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      if (response.status === 402) {
+      if (response.status === 401) {
         return new Response(
-          JSON.stringify({ error: "เครดิตหมด กรุณาติดต่อผู้ดูแลระบบ" }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ error: "API Key ไม่ถูกต้อง กรุณาติดต่อผู้ดูแลระบบ" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       const errorText = await response.text();
-      console.error("AI Gateway error:", response.status, errorText);
-      throw new Error(`AI Gateway error: ${response.status}`);
+      console.error("OpenAI API error:", response.status, errorText);
+      throw new Error(`OpenAI API error: ${response.status}`);
     }
 
     const data = await response.json();
-    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    const content = data.choices?.[0]?.message?.content;
 
     if (!content) {
-      console.error("Gemini API response:", JSON.stringify(data));
+      console.error("OpenAI API response:", JSON.stringify(data));
       throw new Error("No content in AI response");
     }
 
@@ -128,39 +136,32 @@ serve(async (req) => {
     // Parse JSON from the response
     let analysisResult;
     try {
-      // Remove markdown code blocks and other prefixes
-      let cleanContent = content;
-
-      // Remove ```json and ``` markers
-      cleanContent = cleanContent.replace(/```json\s*/g, '');
-      cleanContent = cleanContent.replace(/```\s*/g, '');
-
-      // Remove "json prefix if present (common in some API responses)
-      cleanContent = cleanContent.replace(/^["']?json\s*/i, '');
-
-      // Remove any leading/trailing quotes
-      cleanContent = cleanContent.replace(/^["']+|["']+$/g, '');
-      cleanContent = cleanContent.trim();
-
-      // Try to extract JSON from the response
-      const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        analysisResult = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("No JSON found in response");
-      }
+      // OpenAI with response_format json_object should return clean JSON
+      analysisResult = JSON.parse(content);
+      console.log("✅ Successfully parsed JSON response");
     } catch (parseError) {
-      console.error("JSON parse error:", parseError);
+      console.error("❌ JSON parse error:", parseError);
       console.error("Raw content:", content);
 
-      // Return a fallback response
-      analysisResult = {
-        documentType: "เอกสารทั่วไป",
-        riskScore: 50,
-        summary: content.slice(0, 200),
-        risks: [],
-        recommendations: ["กรุณาปรึกษาผู้เชี่ยวชาญเพิ่มเติม"]
-      };
+      // Fallback: try to clean and parse
+      let cleanContent = content;
+      cleanContent = cleanContent.replace(/```json\s*/gi, '');
+      cleanContent = cleanContent.replace(/```\s*/g, '');
+      cleanContent = cleanContent.trim();
+
+      try {
+        analysisResult = JSON.parse(cleanContent);
+        console.log("✅ Parsed after cleaning");
+      } catch (e) {
+        // Return a fallback response
+        analysisResult = {
+          documentType: "เอกสารทั่วไป",
+          riskScore: 50,
+          summary: content.slice(0, 200),
+          risks: [],
+          recommendations: ["กรุณาปรึกษาผู้เชี่ยวชาญเพิ่มเติม"]
+        };
+      }
     }
 
     return new Response(
