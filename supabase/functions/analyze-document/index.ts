@@ -128,8 +128,16 @@ serve(async (req) => {
     // Parse JSON from the response
     let analysisResult;
     try {
+      // Remove markdown code blocks if present
+      let cleanContent = content;
+
+      // Remove ```json and ``` markers
+      cleanContent = cleanContent.replace(/```json\s*/g, '');
+      cleanContent = cleanContent.replace(/```\s*/g, '');
+      cleanContent = cleanContent.trim();
+
       // Try to extract JSON from the response
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         analysisResult = JSON.parse(jsonMatch[0]);
       } else {
@@ -137,6 +145,8 @@ serve(async (req) => {
       }
     } catch (parseError) {
       console.error("JSON parse error:", parseError);
+      console.error("Raw content:", content);
+
       // Return a fallback response
       analysisResult = {
         documentType: "เอกสารทั่วไป",
