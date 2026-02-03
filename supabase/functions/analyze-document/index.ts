@@ -86,6 +86,7 @@ serve(async (req) => {
     }
 
     console.log("Calling OpenAI API for document analysis...");
+    console.log("Using model:", imageBase64 ? "gpt-4o" : "gpt-4o-mini");
 
     const response = await fetch(
       "https://api.openai.com/v1/chat/completions",
@@ -105,7 +106,12 @@ serve(async (req) => {
       }
     );
 
+    console.log("OpenAI API response status:", response.status);
+
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error("OpenAI API error details:", errorText);
+
       if (response.status === 429) {
         return new Response(
           JSON.stringify({ error: "ระบบมีผู้ใช้งานมาก กรุณารอสักครู่แล้วลองใหม่" }),
@@ -118,9 +124,20 @@ serve(async (req) => {
           { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      const errorText = await response.text();
-      console.error("OpenAI API error:", response.status, errorText);
-      throw new Error(`OpenAI API error: ${response.status}`);
+      if (response.status === 403) {
+        return new Response(
+          JSON.stringify({ error: "ไม่มีสิทธิ์เข้าถึง API กรุณาตรวจสอบ API Key" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (response.status === 429 || response.status === 402) {
+        return new Response(
+          JSON.stringify({ error: "OpenAI credits หมด กรุณาเติมเครดิตในบัญชี OpenAI" }),
+          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
