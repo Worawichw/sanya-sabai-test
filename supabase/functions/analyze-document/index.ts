@@ -80,7 +80,7 @@ serve(async (req) => {
       parts: parts
     }];
 
-    console.log("Calling Gemini API for document analysis...");
+    console.log("Calling Gemini API for document analysis");
     console.log("Using model: gemini-2.5-flash");
 
     const response = await fetch(
