@@ -58,9 +58,18 @@ serve(async (req) => {
         ? imageBase64.split("base64,")[1]
         : imageBase64;
 
+      // Detect MIME type from data URI
+      let mimeType = "image/jpeg"; // default
+      if (imageBase64.includes("data:")) {
+        const mimeMatch = imageBase64.match(/data:([^;]+);/);
+        if (mimeMatch) {
+          mimeType = mimeMatch[1];
+        }
+      }
+
       parts.push({
         inline_data: {
-          mime_type: "image/jpeg",
+          mime_type: mimeType,
           data: base64Data
         }
       });
